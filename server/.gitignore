@@ -1,0 +1,9 @@
+# File:.gitignore
+
+# Python Environment
+venv/
+__pycache__/
+*.pyc
+
+# Secrets and Configuration
+.env  # CRITICAL: Contains API keys and secrets [3, 2]

@@ -1,4 +1,5 @@
-import { ArrowRight } from "lucide-react"
+import { useMemo, useState } from "react"
+import { ArrowRight, Loader2, ShieldCheck, Sparkles } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -9,33 +10,159 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { Textarea } from "@/components/ui/textarea"
 
-const whatItDoes = [
-  "Accepts fragmented or obscure text, like an old forum post or chat message.",
-  "Uses Google Gemini to intelligently reconstruct missing words, phrases, and context.",
-  "Searches the web automatically for definitions, slang meanings, and cultural references.",
-  "Generates a complete Reconstruction Report showing how Chronos rebuilt the message and where it found supporting context.",
+type Source = {
+  title: string
+  uri: string
+  snippet: string
+}
+
+type ReconstructionReport = {
+  original_fragment: string
+  contextual_sources: Source[]
+  reconstructed_text: string
+  plausibility_score: number
+  justification_summary: string
+}
+
+type ReconstructionResponse = Omit<ReconstructionReport, "contextual_sources"> & {
+  contextual_sources?: Source[] | null
+}
+
+const sampleFragments = [
+  "smh at the top 8 drama. ppl need to chill. g2g, ttyl.",
+  "board meeting got moved again bc supply chain chaos",
+  "need that old leak from 2003 forum about lunar rover",
 ]
 
-const howItWorks = [
+const pipelineStages = [
   {
-    title: "Input your fragment",
-    description:
-      "“smh at the top 8 drama. ppl need to chill. g2g, ttyl.”",
+    title: "Fragment intake",
+    description: "Chronos validates the fragment, normalises casing, and prepares it for extraction.",
+    highlights: ["Supports slang, shorthand, and noisy OCR text."],
   },
   {
-    title: "Gemini reconstructs",
-    description:
-      "“Shaking my head at the drama surrounding the ‘Top 8’ friends list on MySpace. People need to relax. I have got to go, talk to you later.”",
+    title: "Context discovery",
+    description: "Keywords are extracted locally and fired into cost-controlled web search for trustworthy sources.",
+    highlights: ["Retries automatically on transient failures.", "Caches context to stay lightning fast."],
   },
   {
-    title: "Chronos contextualizes",
-    description:
-      "Finds related sources like Wikipedia or slang dictionaries to explain MySpace culture and abbreviations.",
+    title: "Gemini reconstruction",
+    description: "A single Gemini call rebuilds the fragment with grounded citations and a reasoning trail.",
+    highlights: ["Outputs typed JSON that our frontend consumes instantly."],
   },
 ]
+
+const highlights = [
+  { label: "Fragments revived", value: "200+" },
+  { label: "Sources cited", value: "100%" },
+  { label: "Avg turnaround", value: "15s" },
+]
+
+const MIN_FRAGMENT_LENGTH = 10
+const MAX_FRAGMENT_LENGTH = 1000
+
+const rawBaseUrl =
+  ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000/api/v1").replace(
+    /\/$/,
+    ""
+  )
+const API_BASE_URL = rawBaseUrl
+const API_KEY = import.meta.env.VITE_API_KEY as string | undefined
 
 function App() {
+  const [fragment, setFragment] = useState("")
+  const [report, setReport] = useState<ReconstructionReport | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+
+  const fragmentLength = fragment.length
+  const canSubmit = fragment.trim().length >= MIN_FRAGMENT_LENGTH && fragment.trim().length <= MAX_FRAGMENT_LENGTH
+  const confidence = useMemo(
+    () => (report ? Math.round(report.plausibility_score * 100) : null),
+    [report]
+  )
+
+  const handleSampleClick = (value: string) => {
+    setFragment(value)
+    setError(null)
+    setReport(null)
+    setLastUpdated(null)
+  }
+
+  const handleReset = () => {
+    setFragment("")
+    setError(null)
+    setReport(null)
+    setLastUpdated(null)
+  }
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!canSubmit || loading) {
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      const endpoint = `${API_BASE_URL}/reconstruct`
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
+        },
+        body: JSON.stringify({ fragment_text: fragment.trim() }),
+      })
+
+      if (!response.ok) {
+        let message = "We couldn't reconstruct that fragment just yet."
+
+        try {
+          const contentType = response.headers.get("content-type") ?? ""
+          if (contentType.includes("application/json")) {
+            const data = await response.json()
+            message = typeof data?.detail === "string" ? data.detail : message
+          } else {
+            message = await response.text()
+          }
+        } catch (parseError) {
+          console.error(parseError)
+        }
+
+        if (response.status === 401) {
+          message = "Authentication failed. Check your VITE_API_KEY before retrying."
+        }
+
+        throw new Error(message)
+      }
+
+      const payload = (await response.json()) as ReconstructionResponse
+      const normalised: ReconstructionReport = {
+        ...payload,
+        contextual_sources: Array.isArray(payload.contextual_sources)
+          ? payload.contextual_sources
+          : [],
+      }
+      setReport(normalised)
+      setLastUpdated(new Date())
+    } catch (fetchError) {
+      if (fetchError instanceof Error) {
+        setError(fetchError.message)
+      } else {
+        setError("We hit an unexpected error. Please try again.")
+      }
+      setReport(null)
+      setLastUpdated(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="relative min-h-screen w-full overflow-hidden bg-black text-zinc-100">
       <div
@@ -46,207 +173,339 @@ function App() {
         }}
       />
 
-      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-20 px-6 pb-24 pt-12">
+      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-16 px-6 pb-24 pt-12">
         <header className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
           <div>
-            <p className="text-[0.7rem] uppercase tracking-[0.6em] text-zinc-400">
-              Chronos
-            </p>
-            <h1 className="text-2xl font-semibold text-zinc-100">
-              Project Chronos
-            </h1>
+            <p className="text-[0.7rem] uppercase tracking-[0.6em] text-zinc-400">Chronos</p>
+            <h1 className="text-2xl font-semibold text-zinc-100">Project Chronos</h1>
           </div>
           <nav className="flex flex-wrap items-center gap-3 text-sm text-zinc-400">
-            <a className="rounded-full border border-white/10 px-4 py-2 transition hover:border-white/40 hover:text-zinc-100" href="#what-it-does">
-              What it does
+            <a
+              className="rounded-full border border-white/10 px-4 py-2 transition hover:border-white/40 hover:text-zinc-100"
+              href="#reconstruct"
+            >
+              Reconstruct
             </a>
-            <a className="rounded-full border border-white/10 px-4 py-2 transition hover:border-white/40 hover:text-zinc-100" href="#how-it-works">
-              How it works
+            <a
+              className="rounded-full border border-white/10 px-4 py-2 transition hover:border-white/40 hover:text-zinc-100"
+              href="#pipeline"
+            >
+              Pipeline
             </a>
-            <a className="rounded-full border border-white/10 px-4 py-2 transition hover:border-white/40 hover:text-zinc-100" href="#output">
-              Output
+            <a
+              className="rounded-full border border-white/10 px-4 py-2 transition hover:border-white/40 hover:text-zinc-100"
+              href="#report"
+            >
+              Report
             </a>
           </nav>
         </header>
 
-        <main className="flex flex-1 flex-col items-center text-center">
-          <Badge className="bg-primary/20 text-primary">
-            Project Chronos: The AI Archeologist
-          </Badge>
-          <h2 className="mt-6 max-w-4xl text-4xl font-semibold leading-tight tracking-tight text-zinc-100 md:text-5xl">
-            Reconstructing the lost web — one fragment at a time
-          </h2>
-          <p className="mt-6 max-w-2xl text-lg text-zinc-300 md:text-xl">
-            Dive into the digital ruins of the early internet. Project Chronos uses AI to revive incomplete, cryptic, or slang-filled text from forgotten web pages and forums — rebuilding the lost stories of the digital past.
-          </p>
-
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-            <Button size="lg">Launch Chronos</Button>
-            <Button variant="outline" size="lg" className="border-white/20 text-zinc-100">
-              Request a demo
-            </Button>
-          </div>
-
-          <section id="what-it-does" className="mt-20 w-full">
-            <div className="grid gap-8 lg:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle>What It Does</CardTitle>
-                  <CardDescription>
-                    Project Chronos is an AI-powered tool that:
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-4 text-left text-sm leading-relaxed text-zinc-300 md:text-base">
-                    {whatItDoes.map((item) => (
-                      <li key={item} className="flex items-start gap-3">
-                        <span className="mt-1 h-2 w-2 rounded-full bg-primary" />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-
-              <Card id="how-it-works">
-                <CardHeader>
-                  <CardTitle>How It Works</CardTitle>
-                  <CardDescription>
-                    Chronos orchestrates research, reasoning, and sourcing in three precise steps.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ol className="space-y-6 text-left text-sm leading-relaxed text-zinc-300 md:text-base">
-                    {howItWorks.map((item, index) => (
-                      <li key={item.title} className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.35em] text-primary/70">
-                          Step {index + 1}
-                        </p>
-                        <p className="text-base font-medium text-zinc-100">{item.title}</p>
-                        <p className="text-zinc-400">{item.description}</p>
-                      </li>
-                    ))}
-                  </ol>
-                </CardContent>
-              </Card>
-            </div>
-          </section>
-
+        <main className="grid flex-1 gap-20">
           <section
-            id="output"
-            className="mt-20 w-full rounded-[2.2rem] border border-white/12 bg-black/40 p-12 text-left shadow-2xl shadow-zinc-900/30 backdrop-blur-xl"
+            id="reconstruct"
+            className="grid gap-12 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]"
           >
-            <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.35em] text-primary/70">
-                  Reconstruction report
-                </p>
-                <h3 className="mt-3 text-3xl font-semibold text-zinc-100">
-                  Output: a clean, formatted Reconstruction Report
-                </h3>
-                <p className="mt-4 max-w-2xl text-sm text-zinc-400">
-                  Chronos documents how the story was rebuilt and surfaces every reference it touched so you can audit the findings in seconds.
+            <div className="space-y-8">
+              <Badge className="bg-primary/20 text-primary">Project Chronos</Badge>
+              <div className="space-y-6">
+                <h2 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight text-zinc-100 md:text-5xl">
+                  Reconstruct the lost web — one fragment at a time
+                </h2>
+                <p className="max-w-2xl text-lg text-zinc-300 md:text-xl">
+                  Paste any fragment from forgotten forums, AIM chats, or ancient blogs.
+                  Chronos will restore the missing pieces, cite its evidence, and explain how it rebuilt the story.
                 </p>
               </div>
-              <Button variant="subtle" size="lg" className="gap-2">
-                Download sample report
-                <ArrowRight className="h-4 w-4" />
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                {highlights.map((highlight) => (
+                  <Card key={highlight.label} className="border-white/8 bg-black/40 p-6 text-left">
+                    <p className="text-xs uppercase tracking-[0.35em] text-primary/70">
+                      {highlight.label}
+                    </p>
+                    <p className="mt-3 text-3xl font-semibold text-zinc-100">{highlight.value}</p>
+                  </Card>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-400">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <span>Powered by a cost-optimised RAG pipeline with a single Gemini call.</span>
+              </div>
+            </div>
+
+            <Card className="border-white/14 bg-black/50 p-8">
+              <CardHeader className="p-0">
+                <Badge variant="muted" className="bg-white/10 text-xs tracking-[0.4em] text-zinc-300">
+                  Submit a fragment
+                </Badge>
+                <CardTitle className="text-2xl font-semibold text-zinc-100">
+                  Launch Chronos
+                </CardTitle>
+                <CardDescription>
+                  Minimum {MIN_FRAGMENT_LENGTH} characters. Chronos handles up to {MAX_FRAGMENT_LENGTH} characters per request.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6 p-0 pt-6">
+                <form className="space-y-6" onSubmit={handleSubmit}>
+                  <Textarea
+                    value={fragment}
+                    onChange={(event) => setFragment(event.target.value.slice(0, MAX_FRAGMENT_LENGTH))}
+                    placeholder="Paste a cryptic message, slang-filled DM, or half-remembered post..."
+                    required
+                  />
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
+                    <span>At least {MIN_FRAGMENT_LENGTH} characters</span>
+                    <span>
+                      {fragmentLength}/{MAX_FRAGMENT_LENGTH}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    {sampleFragments.map((example) => (
+                      <Button
+                        key={example}
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="rounded-full border border-white/10 bg-white/5 text-xs text-zinc-200 hover:bg-white/10"
+                        onClick={() => handleSampleClick(example)}
+                      >
+                        {example}
+                      </Button>
+                    ))}
+                  </div>
+
+                  {API_KEY ? (
+                    <div className="flex items-center gap-2 text-xs text-zinc-500">
+                      <ShieldCheck className="h-3.5 w-3.5 text-primary/70" />
+                      <span>Requests are authenticated with your configured API key.</span>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+                      Set <code className="font-mono">VITE_API_KEY</code> to avoid 401 responses from the backend.
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button type="submit" size="lg" disabled={!canSubmit || loading}>
+                      {loading ? (
+                        <span className="flex items-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Reconstructing
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          Launch Chronos
+                          <ArrowRight className="h-4 w-4" />
+                        </span>
+                      )}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={handleReset} disabled={fragmentLength === 0 || loading}>
+                      Clear
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </section>
+
+          <section id="pipeline" className="space-y-8">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="space-y-3">
+                <Badge variant="muted" className="bg-white/8 text-xs tracking-[0.4em] text-zinc-300">
+                  Pipeline
+                </Badge>
+                <h3 className="text-3xl font-semibold text-zinc-100 md:text-4xl">How Chronos rebuilds meaning</h3>
+                <p className="max-w-2xl text-sm text-zinc-400 md:text-base">
+                  A single orchestrated pass keeps latency low and annotations precise. Every stage is observable from the frontend.
+                </p>
+              </div>
+              <Button variant="ghost" className="text-sm text-zinc-300" asChild>
+                <a className="flex items-center gap-2" href="#report">
+                  Jump to latest report
+                  <ArrowRight className="h-4 w-4" />
+                </a>
               </Button>
             </div>
 
-            <div className="mt-10 grid gap-6 md:grid-cols-3">
-              <Card className="border-white/10 bg-white/5">
-                <CardHeader>
-                  <CardTitle className="text-sm font-semibold uppercase tracking-[0.3em] text-zinc-200/80">
-                    Original Fragment
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm text-zinc-300">
-                  smh at the top 8 drama. ppl need to chill. g2g, ttyl.
-                </CardContent>
-              </Card>
-              <Card className="border-white/10 bg-white/5">
-                <CardHeader>
-                  <CardTitle className="text-sm font-semibold uppercase tracking-[0.3em] text-zinc-200/80">
-                    AI-Reconstructed Text
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm text-zinc-300">
-                  <p>
-                    Shaking my head at the drama surrounding the “Top 8” friends list on MySpace. People need to relax. I have got to go, talk to you later.
-                  </p>
-                </CardContent>
-              </Card>
-              <Card className="border-white/10 bg-white/5">
-                <CardHeader>
-                  <CardTitle className="text-sm font-semibold uppercase tracking-[0.3em] text-zinc-200/80">
-                    Contextual Sources
-                  </CardTitle>
-                  <CardDescription>
-                    Links and references that back every reconstruction decision.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-3 text-sm text-zinc-200">
-                    <li>
-                      <a
-                        className="transition hover:text-zinc-50"
-                        href="https://en.wikipedia.org/wiki/Myspace"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Wikipedia — MySpace
-                      </a>
-                    </li>
-                    <li>
-                      <a
-                        className="transition hover:text-zinc-50"
-                        href="https://www.urbandictionary.com/define.php?term=Top%208"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Urban Dictionary — Top 8
-                      </a>
-                    </li>
-                    <li>
-                      <a
-                        className="transition hover:text-zinc-50"
-                        href="https://www.netlingo.com/word/ttyl.php"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        NetLingo — ttyl
-                      </a>
-                    </li>
-                  </ul>
-                </CardContent>
-              </Card>
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {pipelineStages.map((stage, index) => (
+                <Card key={stage.title} className="border-white/8 bg-black/45">
+                  <CardHeader>
+                    <Badge variant="muted" className="w-fit rounded-full bg-white/10 text-xs uppercase tracking-[0.4em] text-zinc-300">
+                      Step {index + 1}
+                    </Badge>
+                    <CardTitle className="text-xl font-semibold text-zinc-100">{stage.title}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-zinc-400">{stage.description}</p>
+                    <ul className="space-y-3 text-xs text-zinc-500">
+                      {stage.highlights.map((item) => (
+                        <li key={item} className="flex items-start gap-2">
+                          <span className="mt-1 h-1.5 w-1.5 rounded-full bg-primary" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           </section>
 
-          <section className="mt-20 w-full border-t border-white/10 pt-12">
-            <div className="grid gap-6 text-left sm:grid-cols-3">
-              <Card className="border-white/10 bg-white/5 p-8 text-left">
-                <h4 className="text-4xl font-semibold text-zinc-100">200+</h4>
-                <p className="mt-2 text-sm text-zinc-400">
-                  Fragments reconstructed during private alpha.
-                </p>
+          <section id="report" className="space-y-8">
+            <div className="space-y-3">
+              <Badge variant="muted" className="bg-white/8 text-xs tracking-[0.4em] text-zinc-300">
+                Reconstruction report
+              </Badge>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h3 className="text-3xl font-semibold text-zinc-100 md:text-4xl">Latest output</h3>
+                  <p className="max-w-3xl text-sm text-zinc-400 md:text-base">
+                    Review the reconstructed narrative, reasoning, and citations straight from the backend response.
+                  </p>
+                </div>
+                {lastUpdated && (
+                  <p className="text-xs text-zinc-500">
+                    Last updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card className="border-white/10 bg-black/50">
+                <CardHeader>
+                  <CardTitle className="text-lg text-zinc-100">Reconstructed text</CardTitle>
+                  <CardDescription>Original fragment, AI reconstruction, and confidence score.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  {loading ? (
+                    <div className="space-y-4">
+                      <div className="h-4 w-3/4 animate-pulse rounded-full bg-white/10" />
+                      <div className="h-4 w-full animate-pulse rounded-full bg-white/10" />
+                      <div className="h-4 w-full animate-pulse rounded-full bg-white/10" />
+                    </div>
+                  ) : error ? (
+                    <div className="rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                      {error}
+                    </div>
+                  ) : report ? (
+                    <div className="space-y-6">
+                      <div className="space-y-2">
+                        <p className="text-xs uppercase tracking-[0.35em] text-primary/70">Original fragment</p>
+                        <p className="rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-zinc-300">
+                          {report.original_fragment}
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-xs uppercase tracking-[0.35em] text-primary/70">Gemini reconstruction</p>
+                        <p className="rounded-2xl border border-primary/30 bg-primary/5 px-4 py-4 text-base text-zinc-100">
+                          {report.reconstructed_text}
+                        </p>
+                      </div>
+                      {confidence !== null && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs text-zinc-500">
+                            <span>Confidence</span>
+                            <span>{confidence}%</span>
+                          </div>
+                          <div className="h-2 w-full rounded-full bg-white/10">
+                            <div
+                              className="h-full rounded-full bg-primary shadow-[0_0_20px_rgba(255,255,255,0.2)] transition-all"
+                              style={{ width: `${confidence}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-white/10 bg-black/30 px-5 py-6 text-sm text-zinc-400">
+                      Submit a fragment to see Chronos in action. The reconstructed narrative will appear here alongside
+                      confidence and citations.
+                    </div>
+                  )}
+                </CardContent>
               </Card>
-              <Card className="border-white/10 bg-white/5 p-8 text-left">
-                <h4 className="text-4xl font-semibold text-zinc-100">100%</h4>
-                <p className="mt-2 text-sm text-zinc-400">
-                  Source citations included for every revival.
-                </p>
-              </Card>
-              <Card className="border-white/10 bg-white/5 p-8 text-left">
-                <h4 className="text-4xl font-semibold text-zinc-100">15s</h4>
-                <p className="mt-2 text-sm text-zinc-400">
-                  Average time to deliver a finished report.
-                </p>
+
+              <Card className="border-white/10 bg-black/50">
+                <CardHeader>
+                  <CardTitle className="text-lg text-zinc-100">Contextual sources</CardTitle>
+                  <CardDescription>URLs and snippets used to ground the reconstruction.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {loading ? (
+                    <div className="space-y-3">
+                      {[0, 1, 2].map((index) => (
+                        <div key={index} className="space-y-2">
+                          <div className="h-3 w-2/3 animate-pulse rounded-full bg-white/10" />
+                          <div className="h-3 w-full animate-pulse rounded-full bg-white/10" />
+                          <div className="h-3 w-11/12 animate-pulse rounded-full bg-white/10" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : report && report.contextual_sources.length > 0 ? (
+                    <ul className="space-y-4 text-sm text-zinc-200">
+                      {report.contextual_sources.map((source) => (
+                        <li key={source.uri} className="space-y-2">
+                          <a
+                            className="text-sm font-semibold text-zinc-100 transition hover:text-primary"
+                            href={source.uri}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {source.title || source.uri}
+                          </a>
+                          <p className="text-xs text-zinc-400">{source.snippet}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : report ? (
+                    <p className="text-sm text-zinc-400">
+                      No grounding sources were returned for this fragment, likely because the search context was empty.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-zinc-400">
+                      Once Chronos runs, you will see every citation here with a live link back to the source.
+                    </p>
+                  )}
+                </CardContent>
               </Card>
             </div>
+
+            <Card className="border-white/10 bg-black/45">
+              <CardHeader>
+                <CardTitle className="text-lg text-zinc-100">Reasoning trail</CardTitle>
+                <CardDescription>The justification summary extracted from the structured Gemini response.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <div className="space-y-3">
+                    <div className="h-3 w-full animate-pulse rounded-full bg-white/10" />
+                    <div className="h-3 w-11/12 animate-pulse rounded-full bg-white/10" />
+                    <div className="h-3 w-10/12 animate-pulse rounded-full bg-white/10" />
+                  </div>
+                ) : report ? (
+                  <p className="text-sm leading-relaxed text-zinc-300">{report.justification_summary}</p>
+                ) : (
+                  <p className="text-sm text-zinc-400">
+                    Chain-of-thought style reasoning appears here so analysts can audit every leap Chronos makes.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           </section>
         </main>
+
+        <footer className="border-t border-white/10 pt-10 text-sm text-zinc-500">
+          <p>
+            Project Chronos &mdash; built for digital archeologists. Backend served from FastAPI at
+            <span className="ml-1 font-mono text-xs text-zinc-400">{API_BASE_URL}</span>.
+          </p>
+        </footer>
       </div>
     </div>
   )

@@ -1,73 +1,50 @@
-# React + TypeScript + Vite
+# Chronos Client
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The Chronos client is a React + Vite experience for reconstructing noisy, incomplete internet fragments with a single click. It integrates directly with the FastAPI backend found under `../server`, forwards user fragments, and streams back the structured report produced by the Gemini-powered pipeline.
 
-Currently, two official plugins are available:
+## Prerequisites
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Node.js 20+
+- The Chronos backend running locally (default: `http://localhost:8000`)
 
-## React Compiler
+## Environment variables
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Create a `.env` file in this folder or export the variables before running Vite:
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+VITE_API_BASE_URL=http://localhost:8000/api/v1
+VITE_API_KEY=replace-with-your-shared-secret
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+- `VITE_API_BASE_URL` defaults to `http://localhost:8000/api/v1` if omitted.
+- `VITE_API_KEY` is required because the backend enforces the `X-API-Key` header on `/reconstruct`.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Getting started
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
+
+Open the development server (default: <http://localhost:5173>) and paste any fragment into the launcher. The UI displays live status, reconstruction results, Gemini reasoning, and contextual citations returned by the backend.
+
+## Production build
+
+```bash
+npm run build
+npm run preview
+```
+
+The build artefacts will be emitted to `dist/`. Serve them behind the same origin as your FastAPI instance or update `VITE_API_BASE_URL` accordingly.
+
+## Project structure
+
+- `src/App.tsx` — main homepage with the reconstruction workflow and report viewers.
+- `src/components/ui/*` — reusable UI primitives (buttons, badges, cards, textarea).
+- `src/index.css` — Tailwind theme and animations tailored for the Chronos aesthetic.
+
+## Troubleshooting
+
+- **401 Unauthorized**: confirm that the frontend `VITE_API_KEY` matches `API_KEY_SECRET` in the backend `.env`.
+- **Long-running requests**: the backend performs external Google CSE lookups. Check server logs for rate limits or networking issues.
+- **Missing styling**: ensure Tailwind CSS is enabled (see `@tailwindcss/vite` plugin in `vite.config.ts`).
