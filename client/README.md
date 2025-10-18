@@ -26,7 +26,7 @@ npm install
 npm run dev
 ```
 
-Open the development server (default: <http://localhost:5173>) and paste any fragment into the launcher. The UI displays live status, reconstruction results, Gemini reasoning, and contextual citations returned by the backend.
+Open the development server (default: <http://localhost:5173>) and explore the landing page. Jump into the Chronos Studio to submit a fragment: the UI displays live status, reconstruction results, Gemini reasoning, and confidence straight from the Gemini-only backend.
 
 ## Production build
 
@@ -39,12 +39,14 @@ The build artefacts will be emitted to `dist/`. Serve them behind the same origi
 
 ## Project structure
 
-- `src/App.tsx` — main homepage with the reconstruction workflow and report viewers.
+- `src/App.tsx` — router entry; serves the landing page at `/` and the studio at `/home`.
+- `src/pages/LandingPage.tsx` — marketing/overview experience with fragment launcher and pipeline tour.
+- `src/pages/HomePage.tsx` — Chronos Studio chat workflow for iterative reconstructions.
 - `src/components/ui/*` — reusable UI primitives (buttons, badges, cards, textarea).
 - `src/index.css` — Tailwind theme and animations tailored for the Chronos aesthetic.
 
 ## Troubleshooting
 
 - **401 Unauthorized**: confirm that the frontend `VITE_API_KEY` matches `API_KEY_SECRET` in the backend `.env`.
-- **Long-running requests**: the backend performs external Google CSE lookups. Check server logs for rate limits or networking issues.
+- **Slow responses**: double-check your Gemini quota and inspect the FastAPI logs for throttling or auth issues.
 - **Missing styling**: ensure Tailwind CSS is enabled (see `@tailwindcss/vite` plugin in `vite.config.ts`).

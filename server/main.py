@@ -3,8 +3,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import query_router
 from config import get_settings
-from services.keyword_extractor import KeywordExtractor
-from services.grounding_service import GroundingService
 from services.chronos_service import ChronosService
 
 # --- Application Initialization ---
@@ -37,14 +35,8 @@ app.add_middleware(
 
 # --- Dependency Injection Container Setup ---
 
-# Instantiate singletons for services that will be injected
-extractor_instance = KeywordExtractor()
-grounding_instance = GroundingService(settings)
-chronos_service_instance = ChronosService(
-    settings=settings,
-    extractor=extractor_instance,
-    grounding_service=grounding_instance
-)
+# Instantiate singleton Gemini orchestrator
+chronos_service_instance = ChronosService(settings=settings)
 
 # ✅ FIX: Configure router dependency with the Chronos service singleton
 query_router.set_chronos_service(chronos_service_instance)

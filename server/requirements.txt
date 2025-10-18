@@ -6,7 +6,6 @@ pydantic-settings==2.0.3
 
 # --- Secret Management and Utilities ---
 python-dotenv==1.0.1
-httpx==0.28.1
 
 # --- Google Gemini SDK ---
 google-genai==1.45.0

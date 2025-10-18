@@ -6,4 +6,4 @@ __pycache__/
 *.pyc
 
 # Secrets and Configuration
-.env  # CRITICAL: Contains API keys and secrets [3, 2]
+*.env  # CRITICAL: Contains API keys and secrets [3, 2]

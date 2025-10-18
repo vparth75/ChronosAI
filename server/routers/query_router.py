@@ -1,10 +1,10 @@
 # File: routers/query_router.py
 from fastapi import APIRouter, Depends, HTTPException, status, Security
 from fastapi.security import APIKeyHeader
-from models import FragmentInput, ReconstructionReport, GroundingFailure, LLMSynthesisFailure
+from models import FragmentInput, ReconstructionReport, LLMSynthesisFailure
 from services.chronos_service import ChronosService
 from config import get_settings
-from typing import List, Optional
+from typing import Optional
 
 router = APIRouter()
 
@@ -56,12 +56,6 @@ async def submit_query(
     """
     try:
         return await service.process_query(request.fragment_text)
-
-    except GroundingFailure as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="External Service Failure (Grounding)"
-        ) from e
 
     except LLMSynthesisFailure as e:
         raise HTTPException(
